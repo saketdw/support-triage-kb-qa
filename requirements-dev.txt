@@ -1,0 +1,7 @@
+-r requirements.txt
+pytest>=8.0
+jupyter
+nbconvert
+pandas
+matplotlib
+statsmodels
