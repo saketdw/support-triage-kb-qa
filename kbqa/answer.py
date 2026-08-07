@@ -62,7 +62,7 @@ ABSTAIN_TEXT = (
 class Answer:
     answer: str
     doc_ids: tuple[str, ...]
-    kind: str                      # "answer" | "negative" | "abstain"
+    kind: str                      # "answer" | "hedge" | "negative" | "abstain"
     score: float                   # top retrieval score (abstention evidence)
     sentences: tuple[str, ...] = field(default=())
 
@@ -101,6 +101,11 @@ class AnswerService:
             return sentences[:MAX_SENTENCES], 0.0
         sims = cosine_similarity(matrix[-1], matrix[:-1])[0]
         best = float(sims.max())
+        if best < SENTENCE_MIN:
+            # Zero lexical coverage: similarity ordering is arbitrary noise.
+            # Policy documents lead with the operative rule, so fall back to
+            # the document-initial sentences instead of a random pick.
+            return sentences[:MAX_SENTENCES], best
         picked = sorted(np.argsort(sims)[::-1][:MAX_SENTENCES])  # back to document order
         return [sentences[i] for i in picked], best
 
@@ -121,13 +126,28 @@ class AnswerService:
         # answer with the expired document as evidence (q: "is the promo still
         # running?" -> "no, it ended on ...").
         if top.doc is None:
-            expired = self.kb.docs[top.matched_id]
-            text = (
-                f"No current policy: \"{expired.title}\" ({expired.doc_id}) was "
-                f"{_window(expired)} and is not in force on {as_of.isoformat()}. "
-                f"For reference, it said: {' '.join(split_sentences(self.kb.body_text(expired.doc_id))[:1])}"
-            )
-            return Answer(text, (expired.doc_id,), "negative", top.score)
+            other = self.kb.docs[top.matched_id]
+            first_line = " ".join(split_sentences(self.kb.body_text(other.doc_id))[:1])
+            if other.effective_date and other.effective_date > as_of:
+                # Asked about a date before this policy family existed. Name the
+                # family's *earliest* version, not whichever one happened to match.
+                family = self.kb.families.get(other.doc_id, (other.doc_id,))
+                earliest = min((self.kb.docs[d] for d in family), key=lambda d: d.effective_date)
+                first_line = " ".join(split_sentences(self.kb.body_text(earliest.doc_id))[:1])
+                text = (
+                    f"No policy on this was in force on {as_of.isoformat()}: the earliest "
+                    f"relevant document, \"{earliest.title}\" ({earliest.doc_id}), only takes "
+                    f"effect on {earliest.effective_date.isoformat()}. From that date it said: "
+                    f"{first_line}"
+                )
+                return Answer(text, (earliest.doc_id,), "negative", top.score)
+            else:
+                text = (
+                    f"No current policy: \"{other.title}\" ({other.doc_id}) was "
+                    f"{_window(other)} and is not in force on {as_of.isoformat()}. "
+                    f"For reference, it said: {first_line}"
+                )
+            return Answer(text, (other.doc_id,), "negative", top.score)
 
     # Right document, but does it contain the asked-for detail?
         sentences, sent_score = self._extract(question, top.doc)
@@ -138,7 +158,7 @@ class AnswerService:
                 + f"The knowledge base does not directly cover this specific detail. "
                   f"What the closest policy does say: {' '.join(sentences[:1]) if sentences else '(no relevant text)'}"
             )
-            return Answer(text, (top.doc.doc_id,), "answer", top.score, tuple(sentences[:1]))
+            return Answer(text, (top.doc.doc_id,), "hedge", top.score, tuple(sentences[:1]))
 
         doc_ids = [top.doc.doc_id]
         body = " ".join(sentences)
