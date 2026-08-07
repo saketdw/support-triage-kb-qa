@@ -15,10 +15,12 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
 from kbqa.answer import AnswerService
+from kbqa.kb import KBError
 
 
 def _fail(msg: str) -> None:
@@ -73,10 +75,20 @@ def main(argv: list[str] | None = None) -> None:
     args = ap.parse_args(argv)
 
     questions = read_questions(args.input)
-    service = AnswerService(args.kb)
+    try:
+        service = AnswerService(args.kb)
+    except KBError as e:
+        # A malformed or missing knowledge base is an operator error, not a
+        # crash: name the problem instead of printing a traceback.
+        _fail(f"knowledge base could not be loaded: {e}")
 
-    kinds = {"answer": 0, "negative": 0, "abstain": 0}
-    with open(args.output, "w", newline="", encoding="utf-8") as f:
+    # Counter, not a fixed dict: adding an answer path must never break the CLI.
+    kinds: Counter[str] = Counter()
+    try:
+        out = open(args.output, "w", newline="", encoding="utf-8")
+    except OSError as e:
+        _fail(f"cannot write to --output {args.output}: {e.strerror}")
+    with out as f:
         writer = csv.writer(f)
         writer.writerow(["qid", "answer", "doc_ids"])
         for q in questions:
@@ -84,10 +96,8 @@ def main(argv: list[str] | None = None) -> None:
             kinds[result.kind] += 1
             writer.writerow([q["qid"], result.answer, ";".join(result.doc_ids)])
 
-    print(
-        f"wrote {len(questions)} answers to {args.output} "
-        f"({kinds['answer']} answered, {kinds['negative']} negative, {kinds['abstain']} abstained)"
-    )
+    breakdown = ", ".join(f"{n} {kind}" for kind, n in sorted(kinds.items()))
+    print(f"wrote {len(questions)} answers to {args.output} ({breakdown})")
 
 
 if __name__ == "__main__":
