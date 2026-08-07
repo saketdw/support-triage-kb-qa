@@ -157,3 +157,10 @@ def test_cli_rejects_missing_file(tmp_path):
     with pytest.raises(SystemExit) as e:
         predict.main(["--input", str(tmp_path / "nope.csv"), "--output", str(tmp_path / "out.csv")])
     assert e.value.code == 2
+
+
+def test_cli_unwritable_output_fails_cleanly(messages_csv, tmp_path):
+    """Operator errors must exit with a message, not a traceback."""
+    with pytest.raises(SystemExit) as e:
+        predict.main(["--input", str(messages_csv), "--output", "/nonexistent-dir/out.csv"])
+    assert e.value.code == 2

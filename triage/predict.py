@@ -68,7 +68,11 @@ def main(argv: list[str] | None = None) -> None:
         flags = confidence < args.review_threshold
         header.append("needs_review")
 
-    with open(args.output, "w", newline="", encoding="utf-8") as f:
+    try:
+        out = open(args.output, "w", newline="", encoding="utf-8")
+    except OSError as e:
+        _fail(f"cannot write to --output {args.output}: {e.strerror}")
+    with out as f:
         writer = csv.writer(f)
         writer.writerow(header)
         for i, (message, prediction) in enumerate(zip(messages, predictions)):
