@@ -64,9 +64,11 @@ audited the protocol before trusting it
    *before* the train/test split, so the evaluation saw the test set.
    (Measured: 96 vocabulary entries exist only because of test rows; idf drift
    is third-decimal.)
-2. **Duplicate leakage** — the data is template-generated (28 near-duplicate
-   rows in 14 groups); a random split scores the model on phrasings it
-   memorized.
+2. **Duplicate leakage** — the corpus is generated from ~169 body templates
+   wrapped in `{greeting} + {body} + {asset} + {closing}`; **303 of 400 rows
+   sit in a multi-row template family**. A random split therefore scores the
+   model on phrasings it has effectively memorized. (Cross-checked
+   independently by cosine-similarity clustering.)
 3. **No uncertainty** — one seed, n=80: the Wilson 95% CI for 79/80 is
    **[93.3%, 99.8%]**. The reported precision is noise-level.
 4. **Wrong metric for the stakes** — accuracy on a 40%-majority dataset hides
@@ -75,43 +77,55 @@ audited the protocol before trusting it
 5. **`predict()` retrains per call** — and trains on all 400 rows, deploying a
    different model than the one evaluated.
 
-**The honest number.** Fixing the protocol does *not* lower the score — that
-claim would be wrong, and I checked before making it:
+**The honest number is a range, because the protocol decides the question.**
 
-| Protocol | Accuracy | Fraud recall |
-|---|---|---|
-| As shipped (leaky, one 80-row split) | 98.75% | not reported |
-| Split-first, same seed | 98.75% | — |
-| Stratified 5-fold CV, pipeline | 100.0% | 100% |
-| **Template-grouped 5-fold CV** (honest) | **99.75%** | **98%** |
-| Grouped CV + `class_weight='balanced'` | 100.0% | 100% |
+| Protocol | The question it answers | Accuracy | Fraud recall |
+|---|---|---|---|
+| As shipped (leaky, one 80-row split) | — | 98.75% | not reported |
+| Stratified 5-fold, pipeline | traffic resembles this corpus | 100% | **1.00** |
+| **Template-grouped 5-fold** | an entire phrasing family is new | **93.75%** | **0.76** |
+| *the gap* | *the memorization component* | *6.2 pp* | *24 pp* |
 
-The task is linearly separable, so the benchmark is **at ceiling — which is
-evidence about the benchmark, not about production readiness**. The learned
-features are template fingerprints (`someone`, `never`, `was` vote for fraud);
-six hand-written benign messages produce five false fraud reports, one at 0.948
-confidence (notebook §7). The single honest-protocol error is an urgent
-**$10,000 theft routed to the dispute queue** — exactly the expensive
-direction. And no alternative model can be *proven* better here: McNemar needs
-6 discordant pairs for significance and the baseline makes 1 error in 400
-(power analysis: ~9,100 samples per arm to certify a 0.15 pp gain). The only
-significant model difference found was Naive-Bayes-on-TF-IDF being *worse*
-(fraud recall 0.76).
+So the reported figure is **both unsupported** (invalid protocol; CI [93.3%,
+99.8%]) **and optimistic** about genuinely new phrasings: under family-level
+grouping the model misses roughly **one fraud ticket in four** (Wilson 95% CI
+[0.63, 0.86]).
 
-**The metric I would hold it to in production:** a **fraud-report recall
-floor** (≥ 0.95) at acceptable per-class precision, monitored continuously —
-with a low-confidence human-review band (the honest-protocol error arrived at
-confidence 0.36 vs a 0.94 median when correct — a wide, usable gap), drift
-monitoring on input and confidence distributions, and agent re-routes as free
-labels. Ship gate: a shadow pilot on real traffic, because nothing measured on
-synthetic templates transfers by default.
+**Why:** the model is a **vocabulary detector, not a fraud detector** — one
+mechanism, three experiments (notebook §5, §7, §8). Benign text containing
+fraud words is flagged (5 of 6 hand-written probes, one at 0.948 confidence);
+novel fraud *using* fraud words is caught (5 of 5); fraud phrased without them
+— *"I clicked a fake link and unauthorized transactions are appearing"* — is
+missed. For an adversarial, drifting class, that is exactly the property that
+decays.
+
+I would quote **fraud recall 0.76–1.00** to a PM and say plainly that where a
+given month lands depends on how much next month's scam vocabulary overlaps
+what we have already seen. A point estimate here would be false precision.
+
+**The metric in production:** fraud-report recall with a floor, measured on
+real traffic (never on this fixture), at acceptable per-class precision, plus
+drift monitoring on input text and confidence distributions, with agent
+re-routes harvested as free labels.
+
+**What makes 0.76 shippable is not a better model but selective prediction.**
+No alternative is significantly better (McNemar; three — NB-on-TF-IDF
+p=0.0001, NB-on-counts p=0.013, gradient boosting p<0.0001 — are significantly
+*worse*). But confidence separates cleanly: median **0.876 when right vs 0.518
+when wrong**, so a `conf < 0.70` band routes **22% of tickets to a human and
+catches 25/25 errors including all 12 missed frauds**. Ship the model *with*
+the band — that is what `--review-threshold` exists for. Ship gate: a shadow
+pilot on real traffic, because nothing measured on a synthetic corpus
+transfers by default.
 
 **The fix** ([baseline/baseline_classifier_fixed.py](baseline/baseline_classifier_fixed.py),
-a small diff as invited): vectorizer inside a `Pipeline`, template-grouped CV
-with per-class metrics, `class_weight='balanced'`, `min_df=2` (removes all 387
-single-document memorization hooks; measured harmless), fit-once serving. The
-CLI (`triage/`) wraps the same reviewed config — a test asserts they cannot
-drift apart.
+a small diff as invited): vectorizer inside a `Pipeline` (leakage becomes
+structurally impossible), both CV protocols reported with per-class metrics and
+the review band, `class_weight='balanced'` (kept on cost grounds — it is not
+statistically distinguishable), `min_df=2` (removes all 387 single-document
+memorization hooks for ~0.5 pp accuracy, fraud recall unchanged), fit-once
+serving. The CLI (`triage/`) wraps the same reviewed config — a test asserts
+they cannot drift apart.
 
 ---
 
@@ -219,8 +233,8 @@ the human re-route rate.
 | Option | Why not, with the measurement |
 |---|---|
 | LLM answer synthesis | Not required by the problem: extraction already guarantees groundedness. Would be a cacheable *rewriter* on top of the same citations (design above); adds a key dependency the brief asks to avoid. |
-| Embeddings / vector DB | The three residual misses are the trigger, but: McNemar shows no Part A model change can reach significance (1 baseline error caps discordant pairs), 31 docs fit in one matrix, and a model download taxes every reviewer. Trigger: paraphrase misses on real traffic at real scale. |
-| Fine-tuned router | 400 templated rows; fraud language drifts adversarially; nothing measurable to gain (power: ~9,100 samples to prove +0.15 pp). |
+| Embeddings / vector DB | The most defensible upgrade on the table — §5/§8 diagnose a *vocabulary* problem, and embeddings are the tool for it. Deferred, not dismissed: no alternative reaches significance in the favourable direction (McNemar), 31 KB docs fit in one matrix, and a model download taxes every reviewer. Trigger: measured paraphrase misses on real traffic. |
+| Fine-tuned router | 400 rows from ~169 templates; nothing measurable to gain (power: ~1,200 samples per arm to prove a 2 pp lift), and per-call cost/latency at 167 rps. |
 | Chunking, rerankers, agent frameworks | 31 short documents. The complexity budget went to temporal correctness, which is what the exercise says fails in production. |
 
 ## Part C (second modality) — decision
