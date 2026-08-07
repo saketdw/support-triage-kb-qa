@@ -68,3 +68,25 @@ def test_missing_input_file_fails_loudly(tmp_path):
     with pytest.raises(SystemExit) as e:
         batch.main(["--input", str(tmp_path / "nope.csv"), "--output", str(tmp_path / "a.csv")])
     assert e.value.code == 2
+
+
+def test_bad_kb_directory_fails_cleanly(tmp_path, capsys):
+    """A malformed or empty knowledge base is an operator error: exit 2 with a
+    message naming the problem, not a traceback."""
+    inp = tmp_path / "q.csv"
+    write_csv(inp, [["x1", "What is the fee?", "2026-07-28"]])
+    empty_kb = tmp_path / "empty_kb"
+    empty_kb.mkdir()
+    with pytest.raises(SystemExit) as e:
+        batch.main(["--input", str(inp), "--output", str(tmp_path / "a.csv"), "--kb", str(empty_kb)])
+    assert e.value.code == 2
+    assert "knowledge base could not be loaded" in capsys.readouterr().err
+
+
+def test_unwritable_output_fails_cleanly(tmp_path, capsys):
+    inp = tmp_path / "q.csv"
+    write_csv(inp, [["x1", "What is the fee?", "2026-07-28"]])
+    with pytest.raises(SystemExit) as e:
+        batch.main(["--input", str(inp), "--output", "/nonexistent-dir/a.csv"])
+    assert e.value.code == 2
+    assert "cannot write to --output" in capsys.readouterr().err
