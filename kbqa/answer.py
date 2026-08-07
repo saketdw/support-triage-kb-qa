@@ -141,15 +141,15 @@ class AnswerService:
                     f"{first_line}"
                 )
                 return Answer(text, (earliest.doc_id,), "negative", top.score)
-            else:
-                text = (
-                    f"No current policy: \"{other.title}\" ({other.doc_id}) was "
-                    f"{_window(other)} and is not in force on {as_of.isoformat()}. "
-                    f"For reference, it said: {first_line}"
-                )
+
+            text = (
+                f"No current policy: \"{other.title}\" ({other.doc_id}) was "
+                f"{_window(other)} and is not in force on {as_of.isoformat()}. "
+                f"For reference, it said: {first_line}"
+            )
             return Answer(text, (other.doc_id,), "negative", top.score)
 
-    # Right document, but does it contain the asked-for detail?
+        # Right document — but does it actually contain the asked-for detail?
         sentences, sent_score = self._extract(question, top.doc)
         prefix = _prefix(top.doc, as_of)
         if sent_score < SENTENCE_MIN or not sentences:
