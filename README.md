@@ -46,7 +46,7 @@ fails loudly with the row number.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                 # 44 tests
+pytest -q                 # 49 tests (2 skip without tesseract)
 python -m eval.evaluate   # retrieval + abstention metrics (writes eval/results.md)
 ```
 
@@ -255,20 +255,50 @@ the human re-route rate.
 | Fine-tuned router | 400 rows from ~169 templates; nothing measurable to gain (power: ~1,200 samples per arm to prove a 2 pp lift), and per-call cost/latency at 167 rps. |
 | Chunking, rerankers, agent frameworks | 31 short documents. The complexity budget went to temporal correctness, which is what the exercise says fails in production. |
 
-## Part C (second modality) — decision
+## Part C (second modality) — screenshots via local OCR
 
-Not attempted, by prioritization. What I would build: **screenshots via local
-OCR** (Tesseract with dark-mode inversion), extracted text routed through the
-*same* classifier — one router, many input adapters. Why local: the provided
-assets contain an email address, a **live one-time code**, a wallet address
-and a $4,500 balance — sending those to a hosted OCR/vision API is a
-data-processing event and deposits an active credential in a third party's
-logs. Cost ~$0 and ~200 ms per ticket vs $0.001–0.01 and 1–3 s hosted. First
-live failure: OCR quality on real-world images (recompression, crops, photos
-of screens) — gated by per-word OCR confidence plus a token-count sanity
-check, monitored via the downstream classifier's confidence distribution on
-adapted vs native traffic. The hour this would have taken went to Part B's
-evaluation and tests, where the exercise says the expensive failure lives.
+Built as an optional extra (`brew install tesseract && pip install -r
+requirements-partc.txt`, then):
+
+```bash
+python -m partc.ocr_route --input media/screenshots --output routed.csv
+```
+
+**Architecture: one router, many input adapters.** The screenshot is OCR'd
+locally and the text goes through the *same* classifier as chat and email —
+no second model, no new training data; every router improvement benefits
+every channel. Measured on the three provided images:
+
+| file | OCR conf | route | route conf | needs_review |
+|---|---|---|---|---|
+| login-error.png | 91.6 | account-access ✓ | 0.95 | false |
+| phishing-sms.png | 93.2 | fraud-report ✓ | **0.31** | **true** |
+| txn-failed.png | 93.0 | transaction-dispute ✓ | 0.96 | false |
+
+Three correct routes — and the middle row is the interesting one: the
+phishing SMS routes *correctly but at 0.31 confidence*. That is **covariate
+shift** made visible — OCR output (UI chrome + an SMS thread) is not the
+distribution the classifier was trained on — and it is caught by the review
+band, not by OCR confidence (which was a happy 93). The two gates are
+deliberately different instruments: OCR confidence catches bad *images*, the
+route-confidence band catches bad *fits*. (Honesty note: n=3 synthetic
+renders demonstrates the wiring, not performance. Dark-mode inversion is
+applied by luminance check; on these clean renders it measured neutral —
+Tesseract 5 copes — and is kept as free insurance for low-contrast real
+captures.)
+
+**Why local, not a hosted vision API:** these images contain an email
+address, a **live one-time code**, a wallet address and a $4,500 balance.
+Shipping them to a third-party API is a data-processing event and deposits an
+active credential in someone else's request logs. Local OCR costs ~$0 and
+~200 ms/ticket vs ~$0.001–0.01 and 1–3 s hosted. In production, derived text
+is redacted (OTP-shaped digit runs, wallet addresses) before touching any
+log, and the pixels are dropped after triage. **What fails first live:** OCR
+quality on real-world images — photos of screens, crops, messaging-app
+recompression — gated here by per-word confidence + word count with fallback
+to human triage, and monitored via the downstream classifier's confidence on
+OCR'd vs native traffic (the adapter can degrade even when OCR reports itself
+happy).
 
 ---
 
@@ -310,7 +340,8 @@ triage/              Part A entry point: model config + predict CLI
 kbqa/                Part B: kb.py (load/validate/resolve) · retrieval.py · answer.py · batch.py
 eval/                gold labels, evaluation harness, results.md
 notebooks/           01_eda_baseline_review.ipynb — executed evidence log for Part A
-tests/               44 tests incl. a hermetic mini-KB reproducing the drift trap
-examples/            sample inputs and the outputs both CLIs produce on them
-data/ kb/ questions.csv   starter assets, unmodified
+partc/               optional screenshot adapter: local OCR into the same router
+tests/               46 tests incl. a hermetic mini-KB reproducing the drift trap
+examples/            sample inputs and the outputs the CLIs produce on them
+data/ kb/ media/ questions.csv   starter assets, unmodified
 ```

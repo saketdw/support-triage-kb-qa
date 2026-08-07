@@ -1,0 +1,4 @@
+file,ocr_confidence,words,route,route_confidence,needs_review
+login-error.png,91.6,65,account-access,0.95,false
+phishing-sms.png,93.2,84,fraud-report,0.31,true
+txn-failed.png,93.0,63,transaction-dispute,0.96,false
