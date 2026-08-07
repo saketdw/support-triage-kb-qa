@@ -18,9 +18,22 @@ from sklearn.pipeline import Pipeline, make_pipeline
 REPO_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_TRAIN = REPO_ROOT / "data" / "train.csv"
 
+# The corpus is generated from ~169 body templates wrapped in four slots:
+#   {greeting} + {body} + {asset} + {closing}
+# Collapsing all three wrapper slots recovers the real template family. Masking
+# only the asset (the obvious first attempt) finds 386 "groups" of at most 2 —
+# it leaves greeting/closing variants of one body in *different* groups, so they
+# still straddle a split. See notebooks/01_eda_baseline_review.ipynb section 2.
 _ASSET = re.compile(
     r"\b(btc|eth|sol|ada|doge|dogecoin|bitcoin|ethereum|solana|polygon|matic|"
     r"xrp|usdc|ltc|litecoin|avax|cardano|tron|dot|polkadot)\b"
+)
+_GREETING = re.compile(
+    r"^(hi|hey|hello team|hello|good morning|quick question|please help|dear support)\b[ ,]*"
+)
+_CLOSING = re.compile(
+    r"\b(thanks|thank you|please advise|appreciate any help|this is time sensitive|"
+    r"any help appreciated)\b[ .]*"
 )
 
 
@@ -51,14 +64,23 @@ def build_pipeline() -> Pipeline:
 
 
 def template_groups(texts: list[str]) -> np.ndarray:
-    """Group id per message: normalized text with asset names masked.
+    """Group id per message, keyed on the generator's *body* template.
 
-    Used by evaluation code (GroupKFold) so sibling phrasings of one template
-    never straddle a train/test boundary.
+    Normalizes the text, then strips the three variable wrapper slots (asset,
+    greeting, closing) so that every phrasing of one body shares an id. Used by
+    evaluation code with GroupKFold, which then scores the model only on
+    template families it never trained on.
+
+    Note what this measures: grouped CV answers "how do we do on an entirely
+    new phrasing family?", while a stratified split answers "how do we do if
+    next week resembles this corpus?". Both are reported — the gap between them
+    is the memorization component (see the notebook, sections 5 and 8).
     """
     seen: dict[str, int] = {}
     out = []
     for t in texts:
         key = re.sub(r"\s+", " ", re.sub(r"[^a-z ]", " ", t.lower())).strip()
-        out.append(seen.setdefault(_ASSET.sub("ASSET", key), len(seen)))
+        key = _ASSET.sub("ASSET", key)
+        key = _CLOSING.sub("", _GREETING.sub("", key))
+        out.append(seen.setdefault(re.sub(r"\s+", " ", key).strip(), len(seen)))
     return np.array(out)

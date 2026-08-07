@@ -46,9 +46,30 @@ def test_cli_config_matches_reviewed_fix():
         assert ours.steps[-1][1].get_params()[key] == theirs.steps[-1][1].get_params()[key]
 
 
+def test_template_grouping_recovers_the_generator_families():
+    """Grouping must collapse all three wrapper slots (asset, greeting,
+    closing), not just the asset — otherwise phrasings of one body land in
+    different groups and still straddle a split."""
+    texts, _ = model.load_training()
+    groups = model.template_groups(texts)
+    n_groups, biggest = len(set(groups)), np.bincount(groups).max()
+    assert n_groups < 200, f"grouping too weak: {n_groups} groups (expected ~169 families)"
+    assert biggest >= 8, f"largest family only {biggest} rows; wrapper slots are not collapsed"
+
+    # a body template written with different wrappers must share one group
+    probes = [
+        "Hi, Can you explain how to move Ethereum to an external wallet?",
+        "Quick question, Can you explain how to move XRP to an external wallet? Thanks.",
+        "Can you explain how to move BTC to an external wallet? Please advise.",
+    ]
+    ids = model.template_groups(probes)
+    assert len(set(ids)) == 1, f"wrapper variants split across groups: {ids}"
+
+
 def test_grouped_cv_fraud_recall_floor():
-    """The metric production gates on: fraud-report recall under
-    template-grouped CV must clear 0.95 (measured: 1.00)."""
+    """Fraud-report recall on an entirely unseen phrasing family. Measured
+    0.78; the floor guards against regression, and the honest headline is the
+    range 0.76-1.00 (see the notebook, section 5) — not this number alone."""
     texts, labels = model.load_training()
     preds = cross_val_predict(
         model.build_pipeline(),
@@ -58,7 +79,29 @@ def test_grouped_cv_fraud_recall_floor():
         groups=model.template_groups(texts),
     )
     fraud = recall_score(labels, preds, labels=["fraud-report"], average=None)[0]
-    assert fraud >= 0.95, f"fraud-report recall regressed: {fraud:.3f}"
+    assert fraud >= 0.75, f"fraud-report recall regressed: {fraud:.3f}"
+
+
+def test_review_band_separates_errors_from_correct_predictions():
+    """Selective prediction is the design that makes 0.78 shippable: a
+    low-confidence band must catch the errors it is meant to catch."""
+    texts, labels = model.load_training()
+    labels_arr = np.array(labels)
+    proba = cross_val_predict(
+        model.build_pipeline(),
+        np.array(texts, dtype=object),
+        labels_arr,
+        cv=GroupKFold(n_splits=5),
+        groups=model.template_groups(texts),
+        method="predict_proba",
+    )
+    conf = proba.max(axis=1)
+    wrong = np.array(sorted(set(labels)))[proba.argmax(axis=1)] != labels_arr
+    assert np.median(conf[wrong]) < np.median(conf[~wrong]), "confidence does not separate errors"
+    band = conf < 0.70
+    caught = (band & wrong).sum() / wrong.sum()
+    assert caught >= 0.9, f"review band catches only {caught:.0%} of errors"
+    assert band.mean() <= 0.35, f"review band sends {band.mean():.0%} of traffic to humans"
 
 
 @pytest.fixture()
