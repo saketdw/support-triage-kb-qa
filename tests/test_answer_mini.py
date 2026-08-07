@@ -52,6 +52,16 @@ def test_notice_after_window_is_a_negative_not_a_stale_quote(svc):
     assert "2025-03-05" in a.answer      # says when it ended
 
 
+def test_date_before_the_policy_existed_says_so(svc):
+    """A date earlier than the whole family must not be described as 'expired'
+    — it is 'not yet in force', and the earliest version is the one to name."""
+    a = svc.answer("What is the widget fee?", date(2020, 1, 1))
+    assert a.kind == "negative"
+    assert a.doc_ids == ("fam-001",)          # earliest in the family, not the matched one
+    assert "takes effect" in a.answer
+    assert "2024-01-01" in a.answer
+
+
 def test_out_of_scope_question_abstains(svc):
     a = svc.answer("What is the weather forecast for Paris tomorrow?", date(2025, 6, 1))
     assert a.kind == "abstain"
