@@ -46,7 +46,7 @@ fails loudly with the row number.
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                 # 46 tests (2 skip without tesseract)
+pytest -q                 # 49 tests (2 skip without tesseract)
 python -m eval.evaluate   # retrieval + abstention metrics (writes eval/results.md)
 ```
 
