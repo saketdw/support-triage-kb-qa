@@ -17,22 +17,28 @@ computed in this repo (the EDA notebook or `eval/`), not asserted.
 
 ## Quickstart
 
+**Setup** — every command below is run from the repository root:
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
+git clone https://github.com/saketdw/support-triage-kb-qa.git
+cd support-triage-kb-qa
+python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt          # scikit-learn, numpy, PyYAML
 ```
 
-**Entry point 1 — route classification** (input: CSV with a `text` column):
+**Entry point 1 — route classification.** Input: a CSV with a `text` column.
+`examples/messages_sample.csv` is included so this runs as-is:
 
 ```bash
-python -m triage.predict --input messages.csv --output predictions.csv
+python -m triage.predict --input examples/messages_sample.csv --output predictions.csv
 ```
 
 Output columns: `text,prediction`. Optional `--review-threshold 0.7` adds a
 `needs_review` column (selective prediction; off by default so the schema
 matches the brief exactly).
 
-**Entry point 2 — question answering** (input: CSV with `qid,question,as_of`):
+**Entry point 2 — question answering.** Input: a CSV with `qid,question,as_of`.
+`questions.csv` sits in the repo root, so this runs as-is:
 
 ```bash
 python -m kbqa.batch --input questions.csv --output answers.csv
@@ -42,13 +48,26 @@ Output columns: `qid,answer,doc_ids` (semicolon-separated; empty on
 abstention). A missing `as_of` assumes today (with a warning); a malformed one
 fails loudly with the row number.
 
-**Tests and evaluation:**
+To run against your own file, pass any path — relative to where you are, or
+absolute:
+
+```bash
+python -m kbqa.batch --input /path/to/your_questions.csv --output answers.csv
+```
+
+**Tests and evaluation** (also from the repository root):
 
 ```bash
 pip install -r requirements-dev.txt
-pytest -q                 # 49 tests (2 skip without tesseract)
+pytest -q                 # 51 tests (1 skips without tesseract, see Part C)
 python -m eval.evaluate   # retrieval + abstention metrics (writes eval/results.md)
 ```
+
+Already-generated outputs are committed under `examples/` if you would rather
+read them than run anything: [`examples/answers.csv`](examples/answers.csv)
+(all 38 questions with citations),
+[`examples/predictions.csv`](examples/predictions.csv), and
+[`examples/screenshot_routes.csv`](examples/screenshot_routes.csv).
 
 ---
 
