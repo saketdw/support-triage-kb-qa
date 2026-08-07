@@ -91,17 +91,35 @@ So the reported figure is **both unsupported** (invalid protocol; CI [93.3%,
 grouping the model misses roughly **one fraud ticket in four** (Wilson 95% CI
 [0.63, 0.86]).
 
-**Why:** the model is a **vocabulary detector, not a fraud detector** — one
-mechanism, three experiments (notebook §5, §7, §8). Benign text containing
-fraud words is flagged (5 of 6 hand-written probes, one at 0.948 confidence);
-novel fraud *using* fraud words is caught (5 of 5); fraud phrased without them
-— *"I clicked a fake link and unauthorized transactions are appearing"* — is
-missed. For an adversarial, drifting class, that is exactly the property that
-decays.
+**Why — and what the failure actually is** (notebook §5, §7, §8, §9). The model
+reads surface vocabulary, not intent: benign text containing fraud words is
+flagged (5 of 6 hand-written probes, one at 0.948 confidence), and fraud
+phrased against the grain is missed. The obvious worry is that an adversarial
+class drifts out from under it, so I tested that — and it mostly **does not**
+hold. The discriminative axis is **agency**, not mechanism: `unauthorized`,
+`stolen`, `gone`, `permission` appear in fraud tickets and in **0%** of dispute
+tickets, and agency language reads the same in 2024 as in 2026. Four of five
+scam types that post-date this dataset (address poisoning, pig-butchering,
+malicious dApps, caller-ID spoofing) route correctly with no matching training
+vocabulary.
+
+Two things survive that test, and they matter more than drift:
+
+- **Novelty shows up as lost confidence before lost correctness.** Mean
+  confidence falls from **0.82** on familiar mechanisms to **0.45** on novel
+  ones — and *every* novel probe, including the one misrouted (a token-approval
+  drainer, at 0.35), lands under the review band. The band doesn't need to know
+  which scams are new, only that the model is unsure.
+- **The residual confusion is permanent, not drifting.** *"My balance
+  disappeared overnight **and I want it back**"* routes to disputes despite
+  unambiguous fraud agency, because remedy phrasing is dispute-coded (`want`
+  appears in 24% of dispute tickets and 0% of fraud ones). No amount of fresh
+  scam data fixes that.
 
 I would quote **fraud recall 0.76–1.00** to a PM and say plainly that where a
-given month lands depends on how much next month's scam vocabulary overlaps
-what we have already seen. A point estimate here would be false precision.
+given month lands depends on how close incoming *phrasing* is to phrasing
+already seen — not, per §9, on whether the scams themselves are new. A point
+estimate here would be false precision.
 
 **The metric in production:** fraud-report recall with a floor, measured on
 real traffic (never on this fixture), at acceptable per-class precision, plus
